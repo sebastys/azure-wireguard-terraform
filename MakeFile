@@ -1,0 +1,125 @@
+# Azure WireGuard VPN Terraform Makefile
+.PHONY: help init plan apply destroy clean ssh download status
+
+# Default target
+help: ## Show this help message
+	@echo "Azure WireGuard VPN Terraform Commands:"
+	@echo ""
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "Examples:"
+	@echo "  make init          # Initialize Terraform"
+	@echo "  make plan          # Show deployment plan"
+	@echo "  make apply         # Deploy infrastructure"
+	@echo "  make ssh           # SSH to the server"
+	@echo "  make download      # Download client configs"
+	@echo "  make destroy       # Destroy all resources"
+
+init: ## Initialize Terraform
+	@echo "🔧 Initializing Terraform..."
+	terraform init
+	@echo "✅ Terraform initialized"
+
+validate: ## Validate Terraform configuration
+	@echo "🔍 Validating Terraform configuration..."
+	terraform validate
+	@echo "✅ Configuration is valid"
+
+format: ## Format Terraform files
+	@echo "📝 Formatting Terraform files..."
+	terraform fmt -recursive
+	@echo "✅ Files formatted"
+
+plan: ## Show deployment plan
+	@echo "📋 Planning deployment..."
+	terraform plan
+	@echo "✅ Plan complete"
+
+apply: ## Deploy infrastructure
+	@echo "🚀 Deploying WireGuard VPN server..."
+	terraform apply
+	@echo "✅ Deployment complete!"
+	@echo ""
+	@echo "🔗 Connection info:"
+	@terraform output
+
+destroy: ## Destroy all resources
+	@echo "⚠️  This will destroy ALL resources!"
+	@echo "Press Ctrl+C to cancel, or wait 10 seconds to continue..."
+	@sleep 10
+	@echo "🧨 Destroying resources..."
+	terraform destroy
+	@echo "✅ Resources destroyed"
+
+clean: ## Clean Terraform files
+	@echo "🧹 Cleaning Terraform files..."
+	rm -rf .terraform/
+	rm -f .terraform.lock.hcl
+	rm -f terraform.tfstate*
+	rm -f *.tfplan
+	@echo "✅ Cleaned"
+
+ssh: ## SSH to the WireGuard server
+	@echo "🔐 Connecting to WireGuard server..."
+	@$(shell terraform output -raw ssh_connection_command 2>/dev/null || echo "echo 'No server deployed yet. Run: make apply'")
+
+download: ## Download all client configuration files
+	@echo "📥 Downloading client configurations..."
+	@$(shell terraform output -raw download_configs_command 2>/dev/null || echo "echo 'No server deployed yet. Run: make apply'")
+	@echo "✅ Client configs downloaded"
+
+status: ## Show deployment status and outputs
+	@echo "📊 Deployment Status:"
+	@echo "===================="
+	@terraform output 2>/dev/null || echo "No deployment found. Run 'make apply' first."
+
+server-info: ## Show server information and summary
+	@echo "🖥️  Fetching server information..."
+	@if terraform output public_ip_address >/dev/null 2>&1; then \
+		echo "Connecting to server..."; \
+		ssh -o ConnectTimeout=5 $$(terraform output -raw admin_username)@$$(terraform output -raw public_ip_address) 'cat /home/$$(whoami)/wireguard-summary.txt' 2>/dev/null || echo "Server not ready yet or SSH not accessible"; \
+	else \
+		echo "No server deployed yet. Run: make apply"; \
+	fi
+
+logs: ## View WireGuard installation logs
+	@echo "📜 Fetching installation logs..."
+	@if terraform output public_ip_address >/dev/null 2>&1; then \
+		ssh -o ConnectTimeout=5 $$(terraform output -raw admin_username)@$$(terraform output -raw public_ip_address) 'sudo cat /var/log/wireguard-setup.log' 2>/dev/null || echo "Cannot access logs. Check if server is ready and SSH is accessible."; \
+	else \
+		echo "No server deployed yet. Run: make apply"; \
+	fi
+
+qr: ## Show QR code for first client (mobile setup)
+	@echo "📱 QR Code for mobile client setup:"
+	@if terraform output public_ip_address >/dev/null 2>&1; then \
+		ssh -o ConnectTimeout=5 $$(terraform output -raw admin_username)@$$(terraform output -raw public_ip_address) 'cat /home/$$(whoami)/wg0-client-1.qr' 2>/dev/null || echo "QR code not available yet. Check if server setup is complete."; \
+	else \
+		echo "No server deployed yet. Run: make apply"; \
+	fi
+
+check-prereqs: ## Check prerequisites
+	@echo "🔍 Checking prerequisites..."
+	@command -v terraform >/dev/null 2>&1 || { echo "❌ Terraform not found. Install from: https://terraform.io/downloads"; exit 1; }
+	@echo "✅ Terraform found: $$(terraform version -json | grep -o '"terraform_version":"[^"]*' | cut -d'"' -f4)"
+	@command -v az >/dev/null 2>&1 || { echo "❌ Azure CLI not found. Install from: https://docs.microsoft.com/cli/azure/install-azure-cli"; exit 1; }
+	@echo "✅ Azure CLI found: $$(az version --query '"azure-cli"' -o tsv)"
+	@az account show >/dev/null 2>&1 || { echo "❌ Not logged into Azure. Run: az login"; exit 1; }
+	@echo "✅ Azure CLI authenticated"
+	@test -f terraform.tfvars || { echo "⚠️  terraform.tfvars not found. Copy from terraform.tfvars.example"; }
+	@echo "✅ Prerequisites check complete"
+
+# Advanced targets
+full-deploy: check-prereqs init validate plan apply ## Complete deployment with all checks
+	@echo "🎉 Full deployment completed!"
+
+quick-deploy: init apply ## Quick deployment without validation
+	@echo "⚡ Quick deployment completed!"
+
+# Development targets
+dev-plan: ## Development plan with detailed output
+	terraform plan -detailed-exitcode -out=tfplan
+
+dev-apply: ## Apply from saved plan
+	terraform apply tfplan
+	rm -f tfplan
