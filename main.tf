@@ -36,9 +36,10 @@ resource "azurerm_public_ip" "main" {
   name                = "pip-wireguard-${random_string.unique.result}"
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
+  sku               = "Standard"
   allocation_method   = "Static"
   domain_name_label   = "wireguard-${random_string.unique.result}"
-
+ 
   tags = var.tags
 }
 
